@@ -1,5 +1,103 @@
 
  
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Miradas Fabulosas</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18",
+        "react-dom/client": "https://esm.sh/react-dom@18/client",
+        "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
+        "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"
+      }
+    }
+  </script>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:'Segoe UI',sans-serif;background:#fdf6f6;}
+    .nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:#fff;border-top:1px solid #f0dede;display:flex;z-index:200;}
+    .nav button{flex:1;padding:10px 0 8px;border:none;background:none;cursor:pointer;font-size:10px;color:#aaa;display:flex;flex-direction:column;align-items:center;gap:2px;}
+    .nav button.active{color:#c9878a;}
+    .nav button .ic{font-size:20px;}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module">
+import React,{useState,useEffect} from "react";
+import {createRoot} from "react-dom/client";
+import {initializeApp} from "firebase/app";
+import {getFirestore,collection,doc,setDoc,onSnapshot,deleteDoc,updateDoc} from "firebase/firestore";
+
+const FB = {apiKey:"AIzaSyBbZvr2t9Bh7ekJCM2OP8O64Cgy6KWYDaY",authDomain:"miradas-fabulosas.firebaseapp.com",projectId:"miradas-fabulosas",storageBucket:"miradas-fabulosas.firebasestorage.app",messagingSenderId:"339425359104",appId:"1:339425359104:web:a0e342f5a87c3169512fe5"};
+const db = getFirestore(initializeApp(FB));
+
+const ESTS = ["Dira","Cristina","Katherine","Gabriela","Astrid","Esly","Disponible 7"];
+const SVCS = ["Corte","Tinte","Mechas","Tratamiento","Peinado","Microblading","Powderbrow","Hairstrokes","Extensiones","Uñas","Depilación","Facial","Hilo","Pestañas","Otro"];
+const HORAS = ["07:00","07:30","08:00","08:30","09:00","09:30","10:00","10:30","11:00","11:30","12:00","12:30","13:00","13:30","14:00","14:30","15:00","15:30","16:00","16:30","17:00","17:30","18:00","18:30","19:00"];
+const PRECIOS = {"Corte":150,"Tinte":300,"Mechas":400,"Tratamiento":200,"Peinado":150,"Microblading":800,"Powderbrow":800,"Hairstrokes":700,"Extensiones":600,"Uñas":150,"Depilación":100,"Facial":250,"Hilo":50,"Pestañas":200,"Otro":0};
+const COLORS = {"Dira":"#c9878a","Cristina":"#7bafd4","Katherine":"#6dbf8a","Gabriela":"#d4a44c","Astrid":"#9b7fc4","Esly":"#d47b9a","Disponible 7":"#7bc4b8"};
+const USERS = {"Dira":{pin:"1234",rol:"admin"},"Cristina":{pin:"2222",rol:"estilista"},"Katherine":{pin:"3333",rol:"estilista"},"Gabriela":{pin:"4444",rol:"estilista"},"Astrid":{pin:"5555",rol:"estilista"},"Esly":{pin:"6666",rol:"estilista"},"Disponible 7":{pin:"7777",rol:"estilista"}};
+const NIVELES = [{n:"Bronce",min:1,max:5,e:"🥉",c:"#cd7f32"},{n:"Plata",min:6,max:15,e:"🥈",c:"#aaa"},{n:"Oro",min:16,max:30,e:"🥇",c:"#f0a020"},{n:"Rubí",min:31,max:50,e:"💎",c:"#e0396c"},{n:"Diamante",min:51,max:9999,e:"👑",c:"#7bafd4"}];
+const VPREMIO = 8;
+
+const hoy = () => new Date().toISOString().split("T")[0];
+const fmt = (f) => { if(!f) return ""; const [y,m,d]=f.split("-"); return d+"/"+m+"/"+y; };
+const getNivel = (v) => NIVELES.find(n=>v>=n.min&&v<=n.max)||NIVELES[0];
+const mkLink = (c,a) => window.location.href.split("?")[0]+"?cita="+c.id+"&accion="+a;
+
+const waMsg = (c) => {
+  const svcs = Array.isArray(c.servicios) ? c.servicios.join(", ") : c.servicio;
+  const msg = "Hola "+c.cliente+" \uD83D\uDE0A\u2728\nTe recordamos tu cita en Miradas Fabulosas \uD83D\uDC85\n\n\uD83D\uDCC5 Fecha: "+fmt(c.fecha)+"\n\uD83D\uDD50 Hora: "+c.hora+"\n\u2702\uFE0F Servicios: "+svcs+"\n\uD83D\uDC69 Con: "+c.estilista+"\n\n\u00BFNos confirmas tu cita?\n\n\u2705 S\u00CD, confirmo:\n"+mkLink(c,"confirmar")+"\n\n\u274C No puedo ir:\n"+mkLink(c,"cancelar")+"\n\n\u00A1Te esperamos! \uD83D\uDC95";
+  return "https://wa.me/"+c.telefono.replace(/\D/g,"")+"?text="+encodeURIComponent(msg);
+};
+
+const defForm = () => ({cliente:"",telefono:"",servicios:[],estilista:ESTS[0],fecha:hoy(),hora:"09:00",nota:"",precio:0,cumpleanos:"",frecuente:false,formula:"",alergias:""});
+
+// ── LOGIN ──────────────────────────────────────────────────────
+function Login({onLogin,users}){
+  const [sel,setSel]=useState(null);
+  const [pin,setPin]=useState("");
+  const [err,setErr]=useState("");
+  const press=(d)=>{
+    if(pin.length>=4)return;
+    const n=pin+d;setPin(n);setErr("");
+    if(n.length===4)setTimeout(()=>{
+      const u=users[sel];
+      if(u&&u.pin===n){onLogin(sel,u.rol);setPin("");}
+      else{setErr("PIN incorrecto ❌");setPin("");}
+    },100);
+  };
+  const e=React.createElement;
+  return e("div",{style:{minHeight:"100vh",background:"linear-gradient(160deg,#f9e8e8,#fff0f5)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24}},
+    e("div",{style:{fontSize:52,marginBottom:8}},"💅"),
+    e("div",{style:{fontWeight:800,fontSize:22,color:"#c9878a",marginBottom:4}},"Miradas Fabulosas"),
+    e("div",{style:{fontSize:13,color:"#aaa",marginBottom:32}},"Sistema de gestión"),
+    !sel?e("div",{style:{width:"100%",maxWidth:340}},
+      e("div",{style:{fontWeight:700,fontSize:14,color:"#888",marginBottom:14,textAlign:"center"}},"¿Quién eres?"),
+      ...Object.keys(users).map(n=>e("button",{key:n,onClick:()=>{setSel(n);setPin("");setErr("");},style:{width:"100%",padding:"14px 20px",background:"#fff",border:"2px solid "+(COLORS[n]||"#e8c8c8"),borderRadius:14,marginBottom:10,fontSize:15,fontWeight:700,color:"#333",cursor:"pointer",display:"flex",alignItems:"center",gap:12,boxShadow:"0 2px 8px #e8c8c820"}},
+        e("div",{style:{width:36,height:36,borderRadius:"50%",background:COLORS[n]||"#c9878a",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:16,flexShrink:0}},n[0]),
+        e("div",{style:{textAlign:"left"}},e("div",null,n),e("div",{style:{fontSize:11,color:"#aaa",fontWeight:400}},users[n].rol==="admin"?"👑 Administradora":"💅 Estilista"))
+      ))
+    ):e("div",{style:{width:"100%",maxWidth:300,textAlign:"center"}},
+      e("button",{onClick:()=>{setSel(null);setPin("");setErr("");},style:{background:"none",border:"none",color:"#aaa",fontSize:13,cursor:"pointer",marginBottom:16}},"← Volver"),
+      e("div",{style:{width:48,height:48,borderRadius:"50%",background:COLORS[sel]||"#c9878a",margin:"0 auto 12px",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:22,fontWeight:700}},sel[0]),
+      e("div",{style:{fontWeight:700,fontSize:16,color:"#333",marginBottom:4}},sel),
+      e("div",{style:{fontSize:13,color:"#aaa",marginBottom:24}},"Ingresa tu PIN"),
+      e("div",{style:{display:"flex",justifyContent:"center",gap:14,marginBottom:8}},...[0,1,2,3].map(i=>e("div",{key:i,style:{width:16,height:16,borderRadius:"50%",background:i<pin.length?"#c9878a":"#e8c8c8"}}))),
+      err&&e("div",{style:{color:"#c0392b",fontSize:13,marginBottom:8}},err),
+      e("div",{style:{height:16}}),
+      e("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}},
+        ...[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((d,i)=>e("button",{key:i,onClick:()=>d==="⌫"?setPin(p=>p.slice(0,-1)):d!==""?press(String(d)):null,style:{padding:"18px 0",borderRadius:14,border:"none",background:d==="⌫"?"#f8d7da":d===""?"transparent":"#fff",color:d==="⌫"?"#c0392b":"#333",fontSize:20,fontWeight:700,cursor:d===""?"default":"pointer",boxShadow:d!==""&&d!=="⌫"?"0 2px 8px #e8c8c820":"none"}},d))
+      )
+    )
+  );
+}
+
 // ── COMPONENTE PRINCIPAL (APP) ─────────────────────────────────
 function App(){
   const [user,setUser]=useState(null);
@@ -21,19 +119,6 @@ function App(){
   const [fFecha,setFFecha]=useState(hoy());
   const [fEst,setFEst]=useState("Todas");
   const [fEstado,setFEstado]=useState("Todas");
-  const [masivo,setMasivo]=useState(false);
-  const [mIdx,setMIdx]=useState(null);
-
-  // Fidelidad
-  const [detF,setDetF]=useState(null);
-  const [busqF,setBusqF]=useState("");
-  const [formF,setFormF]=useState({nombre:"",telefono:"",cumpleanos:""});
-  const [showNuevaF,setShowNuevaF]=useState(false);
-
-  // Ingresos
-  const [formG,setFormG]=useState({concepto:"",monto:"",tipo:"gasto",fecha:hoy(),categoria:"Productos"});
-  const [showG,setShowG]=useState(false);
-  const CATS=["Productos","Servicios","Renta","Nómina","Equipo","Otro"];
 
   useEffect(()=>{
     const u1=onSnapshot(collection(db,"citas"),s=>{setCitas(s.docs.map(d=>({...d.data(),id:d.id})));setLoading(false);});
@@ -90,14 +175,6 @@ function App(){
     showT(est==="confirmada"?"✅ Confirmada":est==="cancelada"?"❌ Cancelada — espacio libre":"↩️ Pendiente",est==="confirmada"?"#27ae60":est==="cancelada"?"#c0392b":"#888");
   };
 
-  const guardarF=async()=>{
-    if(!formF.nombre||!formF.telefono){showT("⚠️ Completa nombre y teléfono","#c0392b");return;}
-    const id=formF.telefono.replace(/\D/g,"");
-    await setDoc(doc(db,"fidelidad",id),{nombre:formF.nombre,telefono:formF.telefono,cumpleanos:formF.cumpleanos||"",visitas:0,historial:[],premiosGanados:0,creadaEn:hoy()});
-    showT("✓ Clienta registrada 🌸","#c9878a");
-    setFormF({nombre:"",telefono:"",cumpleanos:""});setShowNuevaF(false);
-  };
-
   const regVisita=async(cl)=>{
     const nv=(cl.visitas||0)+1;
     const gano=nv%VPREMIO===0;
@@ -106,22 +183,12 @@ function App(){
     await updateDoc(doc(db,"fidelidad",cl.id),{visitas:nv,historial:hist,premiosGanados:premios});
     if(gano)showT("🎉 ¡"+cl.nombre+" ganó un servicio gratis!","#c9878a");
     else showT("✓ Visita registrada ("+nv%VPREMIO+"/"+VPREMIO+")","#27ae60");
-    setDetF({...cl,visitas:nv,historial:hist,premiosGanados:premios});
   };
 
   const canjear=async(cl)=>{
     if(!(cl.premiosGanados||0))return;
     await updateDoc(doc(db,"fidelidad",cl.id),{premiosGanados:(cl.premiosGanados||1)-1});
     showT("✓ Premio canjeado","#c9878a");
-    setDetF({...cl,premiosGanados:(cl.premiosGanados||1)-1});
-  };
-
-  const guardarG=async()=>{
-    if(!formG.concepto||!formG.monto){showT("⚠️ Completa los campos","#c0392b");return;}
-    const id=Date.now().toString();
-    await setDoc(doc(db,"gastos",id),{...formG,id,monto:Number(formG.monto)});
-    showT(formG.tipo==="ingreso"?"✓ Ingreso registrado":"✓ Gasto registrado","#27ae60");
-    setFormG({concepto:"",monto:"",tipo:"gasto",fecha:hoy(),categoria:"Productos"});setShowG(false);
   };
 
   const e=React.createElement;
@@ -134,34 +201,30 @@ function App(){
     e("div",{style:{fontSize:15,color:"#666",maxWidth:300}},"Gracias "+confPantalla.cita.cliente+". Tu respuesta ha sido registrada en el sistema de Miradas Fabulosas.")
   );
 
-  return e("div",{style:{paddingBottom:70,maxWidth:480,margin:"0 auto",background:"#fff",minHeight:"100vh",boxShadow:"0 0 20px #00000005"}},
-    // Navbar superior fija
-    e("div",{style:{padding:"16px 20px",background:"#fff",borderBottom:"1px solid #f0dede",display:"flex",justifyContent:"between",alignItems:"center",sticky:"top",zIndex:100}},
+  return e("div",{style:{paddingBottom:70,maxWidth:480,margin:"0 auto",background:"#fff",minHeight:"100vh",boxShadow:"0 0 20px rgba(0,0,0,0.02)"}},
+    e("div",{style:{padding:"16px 20px",background:"#fff",borderBottom:"1px solid #f0dede",display:"flex",justifyContent:"space-between",alignItems:"center"}},
       e("div",null,
         e("div",{style:{fontWeight:800,fontSize:18,color:"#c9878a"}},"Miradas Fabulosas"),
-        e("div",{style:{fontSize:12,color:"#aaa"}},"Hola, "+user+" ("+(isAdmin?"Admin":"Estilista")+")")
+        e("div",{style:{fontSize:12,color:"#aaa"}},"Hola, "+user)
       ),
       e("button",{onClick:()=>{setUser(null);setRol(null);},style:{background:"#fff0f0",border:"none",padding:"6px 12px",borderRadius:8,color:"#c0392b",fontSize:11,fontWeight:700,cursor:"pointer"}},"Salir")
     ),
 
-    // Contenido dinámico por sección
     sec==="agenda"&&e("div",{style:{padding:16}},
       e("div",{style:{display:"flex",gap:10,marginBottom:16}},
-        e("button",{onClick:()=>{setVistaA("lista");setEditId(null);setForm(defForm());},style:{flex:1,padding:10,borderRadius:10,border:"none",background:vistaA==="lista"?"#c9878a":"#f5efe f",color:vistaA==="lista"?"#fff":"#888",fontWeight:700,fontSize:13}},"Ver Citas"),
-        e("button",{onClick:()=>setVistaA("formulario"),style:{flex:1,padding:10,borderRadius:10,border:"none",background:vistaA==="formulario"?"#c9878a":"#f5efef",color:vistaA==="formulario"?"#fff":"#888",fontWeight:700,fontSize:13}},editId?"Editar Cita":"Nueva Cita")
+        e("button",{onClick:()=>{setVistaA("lista");setEditId(null);setForm(defForm());},style:{flex:1,padding:10,borderRadius:10,border:"none",background:vistaA==="lista"?"#c9878a":"#f5efef",color:vistaA==="lista"?"#fff":"#888",fontWeight:700,fontSize:13}},"Ver Citas"),
+        e("button",{onClick:()=>setVistaA("formulario"),style:{flex:1,padding:10,borderRadius:10,border:"none",background:vistaA==="formulario"?"#c9878a":"#f5efef",color:vistaA==="formulario"?"#fff":"#888",fontWeight:700,fontSize:13}},"Nueva Cita")
       ),
       vistaA==="formulario"?e("div",{style:{display:"flex",flexDirection:"column",gap:12}},
         e("input",{placeholder:"Nombre de la clienta",value:form.cliente,onChange:x=>setForm({...form,cliente:x.target.value}),style:{padding:12,borderRadius:10,border:"1px solid #ddd",fontSize:14}}),
         e("input",{placeholder:"Teléfono",value:form.telefono,onChange:x=>setForm({...form,telefono:x.target.value}),style:{padding:12,borderRadius:10,border:"1px solid #ddd",fontSize:14}}),
         e("input",{type:"date",value:form.fecha,onChange:x=>setForm({...form,fecha:x.target.value}),style:{padding:12,borderRadius:10,border:"1px solid #ddd",fontSize:14}}),
         e("select",{value:form.hora,onChange:x=>setForm({...form,hora:x.target.value}),style:{padding:12,borderRadius:10,border:"1px solid #ddd",fontSize:14}},HORAS.map(h=>e("option",{key:h,value:h},h))),
-        isAdmin&&e("select",{value:form.estilista,onChange:x=>setForm({...form,estilista:x.target.value}),style:{padding:12,borderRadius:10,border:"1px solid #ddd",fontSize:14}},ESTS.map(es=>e("option",{key:es,value:es},es))),
         e("div",{style:{fontSize:13,fontWeight:700,color:"#666",marginTop:6}},"Seleccionar Servicios:"),
-        e("div",{style:{display:"flex",flexWrap:"wrap",gap:6}},SVCS.map(s=>e("button",{key:s,onClick:()=>toggleSvc(s),style:{padding:"8px 12px",borderRadius:8,border:"1px solid "+((form.servicios||[]).includes(s)?"#c9878a":"#ddd"),background:(form.servicios||[]).includes(s)?"#fff0f1":"#fff",color:(form.servicios||[]).includes(s)?"#c9878a":"#555",fontSize:12,fontWeight:600,cursor:"pointer"}},s))),
-        e("input",{placeholder:"Nota adicional / Historial",value:form.nota,onChange:x=>setForm({...form,nota:x.target.value}),style:{padding:12,borderRadius:10,border:"1px solid #ddd",fontSize:14}}),
-        e("button",{onClick:guardarCita,style:{padding:14,borderRadius:10,border:"none",background:"#c9878a",color:"#fff",fontWeight:700,fontSize:15,marginTop:10,cursor:"pointer"}},"Confirmar y Guardar")
+        e("div",{style:{display:"flex",flexWrap:"wrap",gap:6}},SVCS.map(s=>e("button",{key:s,onClick:()=>toggleSvc(s),style:{padding:"8px 12px",borderRadius:8,border:"1px solid "+((form.servicios||[]).includes(s)?"#c9878a":"#ddd"),background:(form.servicios||[]).includes(s)?"#fff0f1":"#fff",color:(form.servicios||[]).includes(s)?"#c9878a":"#555",fontSize:12,fontWeight:600}},s))),
+        e("button",{onClick:guardarCita,style:{padding:14,borderRadius:10,border:"none",background:"#c9878a",color:"#fff",fontWeight:700,fontSize:15,marginTop:10,cursor:"pointer"}},"Guardar Cita")
       ):e("div",null,
-        citas.filter(c=>isAdmin||c.estilista===user).map(c=>e("div",{key:c.id,style:{background:"#fff",padding:14,borderRadius:12,borderLeft:"5px solid "+(COLORS[c.estilista]||"#ddd"),marginBottom:10,boxShadow:"0 2px 6px #00000002",border:"1px solid #f0dede"}},
+        citas.filter(c=>isAdmin||c.estilista===user).map(c=>e("div",{key:c.id,style:{background:"#fff",padding:14,borderRadius:12,borderLeft:"5px solid "+(COLORS[c.estilista]||"#ddd"),marginBottom:10,border:"1px solid #f0dede"}},
           e("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},e("strong",null,c.cliente),e("span",{style:{fontSize:12,color:"#888"}},c.hora)),
           e("div",{style:{fontSize:13,color:"#555",marginBottom:8}},Array.isArray(c.servicios)?c.servicios.join(", "):c.servicio),
           e("div",{style:{display:"flex",gap:6}},
@@ -173,27 +236,22 @@ function App(){
       )
     ),
 
-    // Sección de Fidelidad
     sec==="fidelidad"&&e("div",{style:{padding:16}},
-      e("input",{placeholder:"Buscar clienta por teléfono...",value:busqF,onChange:x=>setBusqF(x.target.value),style:{width:"100%",padding:12,borderRadius:10,border:"1px solid #ddd",marginBottom:14}}),
-      fid.filter(f=>f.telefono.includes(busqF)||f.nombre.toLowerCase().includes(busqF.toLowerCase())).map(f=>e("div",{key:f.id,style:{background:"#fff",padding:14,borderRadius:12,border:"1px solid #f0dede",marginBottom:10}},
+      fid.map(f=>e("div",{key:f.id,style:{background:"#fff",padding:14,borderRadius:12,border:"1px solid #f0dede",marginBottom:10}},
         e("div",{style:{fontWeight:700}},f.nombre),
-        e("div",{style:{fontSize:12,color:"#888"}},"Visitas: "+f.visitas+" | Premios: "+(f.premiosGanados||0)),
+        e("div",{style:{fontSize:12,color:"#888"}},"Visitas: "+f.visitas),
         e("div",{style:{display:"flex",gap:6,marginTop:8}},
-          e("button",{onClick:()=>regVisita(f),style:{padding:"6px 12px",background:"#c9878a",color:"#fff",border:"none",borderRadius:6,fontSize:12,fontWeight:700}},"+ Registrar Visita"),
-          f.premiosGanados>0&&e("button",{onClick:()=>canjear(f),style:{padding:"6px 12px",background:"#f0a020",color:"#fff",border:"none",borderRadius:6,fontSize:12,fontWeight:700}},"🎁 Canjear Premio")
+          e("button",{onClick:()=>regVisita(f),style:{padding:"6px 12px",background:"#c9878a",color:"#fff",border:"none",borderRadius:6,fontSize:12,fontWeight:700}},"+ Visita")
         )
       ))
     ),
 
-    // Barra de Navegación Inferior Estilizada
     e("div",{className:"nav"},
       e("button",{className:sec Pac==="agenda"?"active":"",onClick:()=>setSec("agenda")},e("span",{className:"ic"},"📅"),"Agenda"),
       e("button",{className:sec==="fidelidad"?"active":"",onClick:()=>setSec("fidelidad")},e("span",{className:"ic"},"⭐"),"Fidelidad")
     ),
 
-    // Toasts informativos
-    toast&&e("div",{style:{position:"fixed",top:20,left:"50%",transform:translateX("-50%"),background:toast.col,color:"#fff",padding:"10px 20px",borderRadius:20,fontSize:13,fontWeight:700,zIndex:300,boxShadow:"0 4px 12px rgba(0,0,0,0.1)"}},toast.msg)
+    toast&&e("div",{style:{position:"fixed",top:20,left:"50%",transform:"translateX(-50%)",background:toast.col,color:"#fff",padding:"10px 20px",borderRadius:20,fontSize:13,fontWeight:700,zIndex:300}},toast.msg)
   );
 }
 
