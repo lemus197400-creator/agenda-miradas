@@ -58,8 +58,209 @@ const waMsg = (c) => {
 const defForm = () => ({cliente:"",telefono:"",servicios:[],estilista:ESTS[0],fecha:hoy(),hora:"09:00",nota:"",precio:0,cumpleanos:"",frecuente:false,formula:"",alergias:""});
 
 // ── LOGIN ──────────────────────────────────────────────────────
-function Login({onLogin,users}){
-  const [sel,setSel]=useState(null);
+// ── COMPONENTE PRINCIPAL (APP) ─────────────────────────────────
+function App(){
+  const [user,setUser]=useState(null);
+  const [rol,setRol]=useState(null);
+  const [users,setUsers]=useState(USERS);
+  const [citas,setCitas]=useState([]);
+  const [fid,setFid]=useState([]);
+  const [gastos,setGastos]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [sec,setSec]=useState("agenda");
+  const [toast,setToast]=useState(null);
+  const [confPantalla,setConfPantalla]=useState(null);
+  const isAdmin=rol==="admin";
+
+  // Agenda
+  const [vistaA,setVistaA]=useState("lista");
+  const [form,setForm]=useState(defForm());
+  const [editId,setEditId]=useState(null);
+  const [fFecha,setFFecha]=useState(hoy());
+  const [fEst,setFEst]=useState("Todas");
+  const [fEstado,setFEstado]=useState("Todas");
+  const [masivo,setMasivo]=useState(false);
+  const [mIdx,setMIdx]=useState(null);
+
+  // Fidelidad
+  const [detF,setDetF]=useState(null);
+  const [busqF,setBusqF]=useState("");
+  const [formF,setFormF]=useState({nombre:"",telefono:"",cumpleanos:""});
+  const [showNuevaF,setShowNuevaF]=useState(false);
+
+  // Ingresos
+  const [formG,setFormG]=useState({concepto:"",monto:"",tipo:"gasto",fecha:hoy(),categoria:"Productos"});
+  const [showG,setShowG]=useState(false);
+  const CATS=["Productos","Servicios","Renta","Nómina","Equipo","Otro"];
+
+  useEffect(()=>{
+    const u1=onSnapshot(collection(db,"citas"),s=>{setCitas(s.docs.map(d=>({...d.data(),id:d.id})));setLoading(false);});
+    const u2=onSnapshot(collection(db,"fidelidad"),s=>{setFid(s.docs.map(d=>({...d.data(),id:d.id})));});
+    const u3=onSnapshot(collection(db,"gastos"),s=>{setGastos(s.docs.map(d=>({...d.data(),id:d.id})));});
+    const u4=onSnapshot(doc(db,"config","usuarios"),s=>{if(s.exists())setUsers(s.data());});
+    return()=>{u1();u2();u3();u4();};
+  },[]);
+
+  useEffect(()=>{
+    const p=new URLSearchParams(window.location.search);
+    const id=p.get("cita"),ac=p.get("accion");
+    if(id&&ac){localStorage.setItem("mf_pa",JSON.stringify({id,ac}));window.history.replaceState({},"",window.location.pathname);}
+  },[]);
+
+  useEffect(()=>{
+    if(!citas.length||loading)return;
+    try{
+      const pa=localStorage.getItem("mf_pa");
+      if(pa){
+        const {id,ac}=JSON.parse(pa);
+        const c=citas.find(x=>x.id===id);
+        if(c){const est=ac==="confirmar"?"confirmada":"cancelada";setConfPantalla({cita:c,est});updateDoc(doc(db,"citas",id),{estado:est});}
+        localStorage.removeItem("mf_pa");
+      }
+    }catch(e){}
+  },[citas.length,loading]);
+
+  const showT=(msg,col="#222")=>{setToast({msg,col});setTimeout(()=>setToast(null),3000);};
+
+  const toggleSvc=(svc)=>{
+    setForm(f=>{
+      const svcs=f.servicios||[];
+      const nuevo=svcs.includes(svc)?svcs.filter(s=>s!==svc):[...svcs,svc];
+      const precio=nuevo.reduce((s,sv)=>s+(PRECIOS[sv]||0),0);
+      return {...f,servicios:nuevo,precio};
+    });
+  };
+
+  const guardarCita=async()=>{
+    if(!form.cliente||!form.telefono||!form.fecha||!form.hora||!(form.servicios||[]).length){
+      showT("⚠️ Completa todos los campos y selecciona al menos un servicio","#c0392b");return;
+    }
+    const ff=isAdmin?form:{...form,estilista:user};
+    try{
+      if(editId){await updateDoc(doc(db,"citas",editId),ff);showT("✓ Cita actualizada");}
+      else{const id=Date.now().toString();await setDoc(doc(db,"citas",id),{...ff,id,estado:"pendiente"});showT("✓ Cita guardada 🌸","#c9878a");}
+      setForm(defForm());setEditId(null);setVistaA("lista");
+    }catch(e){showT("Error al guardar","#c0392b");}
+  };
+
+  const cambEst=async(id,est)=>{
+    try{await updateDoc(doc(db,"citas",id),{estado:est});}catch(e){}
+    showT(est==="confirmada"?"✅ Confirmada":est==="cancelada"?"❌ Cancelada — espacio libre":"↩️ Pendiente",est==="confirmada"?"#27ae60":est==="cancelada"?"#c0392b":"#888");
+  };
+
+  const guardarF=async()=>{
+    if(!formF.nombre||!formF.telefono){showT("⚠️ Completa nombre y teléfono","#c0392b");return;}
+    const id=formF.telefono.replace(/\D/g,"");
+    await setDoc(doc(db,"fidelidad",id),{nombre:formF.nombre,telefono:formF.telefono,cumpleanos:formF.cumpleanos||"",visitas:0,historial:[],premiosGanados:0,creadaEn:hoy()});
+    showT("✓ Clienta registrada 🌸","#c9878a");
+    setFormF({nombre:"",telefono:"",cumpleanos:""});setShowNuevaF(false);
+  };
+
+  const regVisita=async(cl)=>{
+    const nv=(cl.visitas||0)+1;
+    const gano=nv%VPREMIO===0;
+    const hist=[...(cl.historial||[]),{fecha:hoy(),premio:gano}];
+    const premios=(cl.premiosGanados||0)+(gano?1:0);
+    await updateDoc(doc(db,"fidelidad",cl.id),{visitas:nv,historial:hist,premiosGanados:premios});
+    if(gano)showT("🎉 ¡"+cl.nombre+" ganó un servicio gratis!","#c9878a");
+    else showT("✓ Visita registrada ("+nv%VPREMIO+"/"+VPREMIO+")","#27ae60");
+    setDetF({...cl,visitas:nv,historial:hist,premiosGanados:premios});
+  };
+
+  const canjear=async(cl)=>{
+    if(!(cl.premiosGanados||0))return;
+    await updateDoc(doc(db,"fidelidad",cl.id),{premiosGanados:(cl.premiosGanados||1)-1});
+    showT("✓ Premio canjeado","#c9878a");
+    setDetF({...cl,premiosGanados:(cl.premiosGanados||1)-1});
+  };
+
+  const guardarG=async()=>{
+    if(!formG.concepto||!formG.monto){showT("⚠️ Completa los campos","#c0392b");return;}
+    const id=Date.now().toString();
+    await setDoc(doc(db,"gastos",id),{...formG,id,monto:Number(formG.monto)});
+    showT(formG.tipo==="ingreso"?"✓ Ingreso registrado":"✓ Gasto registrado","#27ae60");
+    setFormG({concepto:"",monto:"",tipo:"gasto",fecha:hoy(),categoria:"Productos"});setShowG(false);
+  };
+
+  const e=React.createElement;
+
+  if(!user) return e(Login,{users,onLogin:(u,r)=>{setUser(u);setRol(r);}});
+
+  if(confPantalla) return e("div",{style:{minHeight:"100vh",background:"#fff",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20,textAlign:"center"}},
+    e("div",{style:{fontSize:64,marginBottom:16}},confPantalla.est==="confirmada"?"✅":"❌"),
+    e("div",{style:{fontSize:22,fontWeight:800,color:"#333",marginBottom:8}},confPantalla.est==="confirmada"?"¡Cita Confirmada!":"Cita Cancelada"),
+    e("div",{style:{fontSize:15,color:"#666",maxWidth:300}},"Gracias "+confPantalla.cita.cliente+". Tu respuesta ha sido registrada en el sistema de Miradas Fabulosas.")
+  );
+
+  return e("div",{style:{paddingBottom:70,maxWidth:480,margin:"0 auto",background:"#fff",minHeight:"100vh",boxShadow:"0 0 20px #00000005"}},
+    // Navbar superior fija
+    e("div",{style:{padding:"16px 20px",background:"#fff",borderBottom:"1px solid #f0dede",display:"flex",justifyContent:"between",alignItems:"center",sticky:"top",zIndex:100}},
+      e("div",null,
+        e("div",{style:{fontWeight:800,fontSize:18,color:"#c9878a"}},"Miradas Fabulosas"),
+        e("div",{style:{fontSize:12,color:"#aaa"}},"Hola, "+user+" ("+(isAdmin?"Admin":"Estilista")+")")
+      ),
+      e("button",{onClick:()=>{setUser(null);setRol(null);},style:{background:"#fff0f0",border:"none",padding:"6px 12px",borderRadius:8,color:"#c0392b",fontSize:11,fontWeight:700,cursor:"pointer"}},"Salir")
+    ),
+
+    // Contenido dinámico por sección
+    sec==="agenda"&&e("div",{style:{padding:16}},
+      e("div",{style:{display:"flex",gap:10,marginBottom:16}},
+        e("button",{onClick:()=>{setVistaA("lista");setEditId(null);setForm(defForm());},style:{flex:1,padding:10,borderRadius:10,border:"none",background:vistaA==="lista"?"#c9878a":"#f5efe f",color:vistaA==="lista"?"#fff":"#888",fontWeight:700,fontSize:13}},"Ver Citas"),
+        e("button",{onClick:()=>setVistaA("formulario"),style:{flex:1,padding:10,borderRadius:10,border:"none",background:vistaA==="formulario"?"#c9878a":"#f5efef",color:vistaA==="formulario"?"#fff":"#888",fontWeight:700,fontSize:13}},editId?"Editar Cita":"Nueva Cita")
+      ),
+      vistaA==="formulario"?e("div",{style:{display:"flex",flexDirection:"column",gap:12}},
+        e("input",{placeholder:"Nombre de la clienta",value:form.cliente,onChange:x=>setForm({...form,cliente:x.target.value}),style:{padding:12,borderRadius:10,border:"1px solid #ddd",fontSize:14}}),
+        e("input",{placeholder:"Teléfono",value:form.telefono,onChange:x=>setForm({...form,telefono:x.target.value}),style:{padding:12,borderRadius:10,border:"1px solid #ddd",fontSize:14}}),
+        e("input",{type:"date",value:form.fecha,onChange:x=>setForm({...form,fecha:x.target.value}),style:{padding:12,borderRadius:10,border:"1px solid #ddd",fontSize:14}}),
+        e("select",{value:form.hora,onChange:x=>setForm({...form,hora:x.target.value}),style:{padding:12,borderRadius:10,border:"1px solid #ddd",fontSize:14}},HORAS.map(h=>e("option",{key:h,value:h},h))),
+        isAdmin&&e("select",{value:form.estilista,onChange:x=>setForm({...form,estilista:x.target.value}),style:{padding:12,borderRadius:10,border:"1px solid #ddd",fontSize:14}},ESTS.map(es=>e("option",{key:es,value:es},es))),
+        e("div",{style:{fontSize:13,fontWeight:700,color:"#666",marginTop:6}},"Seleccionar Servicios:"),
+        e("div",{style:{display:"flex",flexWrap:"wrap",gap:6}},SVCS.map(s=>e("button",{key:s,onClick:()=>toggleSvc(s),style:{padding:"8px 12px",borderRadius:8,border:"1px solid "+((form.servicios||[]).includes(s)?"#c9878a":"#ddd"),background:(form.servicios||[]).includes(s)?"#fff0f1":"#fff",color:(form.servicios||[]).includes(s)?"#c9878a":"#555",fontSize:12,fontWeight:600,cursor:"pointer"}},s))),
+        e("input",{placeholder:"Nota adicional / Historial",value:form.nota,onChange:x=>setForm({...form,nota:x.target.value}),style:{padding:12,borderRadius:10,border:"1px solid #ddd",fontSize:14}}),
+        e("button",{onClick:guardarCita,style:{padding:14,borderRadius:10,border:"none",background:"#c9878a",color:"#fff",fontWeight:700,fontSize:15,marginTop:10,cursor:"pointer"}},"Confirmar y Guardar")
+      ):e("div",null,
+        citas.filter(c=>isAdmin||c.estilista===user).map(c=>e("div",{key:c.id,style:{background:"#fff",padding:14,borderRadius:12,borderLeft:"5px solid "+(COLORS[c.estilista]||"#ddd"),marginBottom:10,boxShadow:"0 2px 6px #00000002",border:"1px solid #f0dede"}},
+          e("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},e("strong",null,c.cliente),e("span",{style:{fontSize:12,color:"#888"}},c.hora)),
+          e("div",{style:{fontSize:13,color:"#555",marginBottom:8}},Array.isArray(c.servicios)?c.servicios.join(", "):c.servicio),
+          e("div",{style:{display:"flex",gap:6}},
+            e("button",{onClick:()=>cambEst(c.id,"confirmada"),style:{padding:"6px 10px",borderRadius:6,border:"none",background:"#e8f8f0",color:"#27ae60",fontSize:11,fontWeight:700}},"Confirmar"),
+            e("button",{onClick:()=>cambEst(c.id,"cancelada"),style:{padding:"6px 10px",borderRadius:6,border:"none",background:"#fdedec",color:"#c0392b",fontSize:11,fontWeight:700}},"Cancelar"),
+            e("a",{href:waMsg(c),target:"_blank",style:{padding:"6px 10px",borderRadius:6,background:"#eafaf1",color:"#2ecc71",fontSize:11,fontWeight:700,textDecoration:"none"}},"WhatsApp")
+          )
+        ))
+      )
+    ),
+
+    // Sección de Fidelidad
+    sec==="fidelidad"&&e("div",{style:{padding:16}},
+      e("input",{placeholder:"Buscar clienta por teléfono...",value:busqF,onChange:x=>setBusqF(x.target.value),style:{width:"100%",padding:12,borderRadius:10,border:"1px solid #ddd",marginBottom:14}}),
+      fid.filter(f=>f.telefono.includes(busqF)||f.nombre.toLowerCase().includes(busqF.toLowerCase())).map(f=>e("div",{key:f.id,style:{background:"#fff",padding:14,borderRadius:12,border:"1px solid #f0dede",marginBottom:10}},
+        e("div",{style:{fontWeight:700}},f.nombre),
+        e("div",{style:{fontSize:12,color:"#888"}},"Visitas: "+f.visitas+" | Premios: "+(f.premiosGanados||0)),
+        e("div",{style:{display:"flex",gap:6,marginTop:8}},
+          e("button",{onClick:()=>regVisita(f),style:{padding:"6px 12px",background:"#c9878a",color:"#fff",border:"none",borderRadius:6,fontSize:12,fontWeight:700}},"+ Registrar Visita"),
+          f.premiosGanados>0&&e("button",{onClick:()=>canjear(f),style:{padding:"6px 12px",background:"#f0a020",color:"#fff",border:"none",borderRadius:6,fontSize:12,fontWeight:700}},"🎁 Canjear Premio")
+        )
+      ))
+    ),
+
+    // Barra de Navegación Inferior Estilizada
+    e("div",{className:"nav"},
+      e("button",{className:sec Pac==="agenda"?"active":"",onClick:()=>setSec("agenda")},e("span",{className:"ic"},"📅"),"Agenda"),
+      e("button",{className:sec==="fidelidad"?"active":"",onClick:()=>setSec("fidelidad")},e("span",{className:"ic"},"⭐"),"Fidelidad")
+    ),
+
+    // Toasts informativos
+    toast&&e("div",{style:{position:"fixed",top:20,left:"50%",transform:translateX("-50%"),background:toast.col,color:"#fff",padding:"10px 20px",borderRadius:20,fontSize:13,fontWeight:700,zIndex:300,boxShadow:"0 4px 12px rgba(0,0,0,0.1)"}},toast.msg)
+  );
+}
+
+const root = createRoot(document.getElementById("root"));
+root.render(React.createElement(App));
+</script>
+</body>
+</html>function Login({onLogin,users}){
+ const [sel,setSel]=useState(null);
   const [pin,setPin]=useState("");
   const [err,setErr]=useState("");
   const press=(d)=>{
